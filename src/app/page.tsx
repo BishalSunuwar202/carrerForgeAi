@@ -52,7 +52,7 @@ export default function Home() {
         throw new Error(`Failed to process request: ${response.status} ${errorText}`)
       }
 
-      // Handle streaming response (text stream format)
+      // Handle streaming response (text stream format - simpler than UI message stream)
       const reader = response.body?.getReader()
       if (!reader) {
         throw new Error("No response body")
@@ -61,62 +61,37 @@ export default function Home() {
       const decoder = new TextDecoder()
       let assistantContent = ""
       const assistantId = (Date.now() + 1).toString()
+      let hasReceivedContent = false
 
-      // Process the stream
+      console.log("Starting to read text stream...")
+
+      // Process the stream - text stream is simpler, just append chunks
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          console.log("Stream ended. Total content length:", assistantContent.length)
+          break
+        }
 
         if (value) {
           const chunk = decoder.decode(value, { stream: true })
           
           if (chunk) {
-            // Handle UI message stream format: prefix:JSON
-            const lines = chunk.split('\n')
+            assistantContent += chunk
+            hasReceivedContent = true
             
-            for (const line of lines) {
-              if (line.trim()) {
-                // UI message stream format: "0:{"type":"text-delta","textDelta":"..."}" or "0:{"type":"text","text":"..."}"
-                if (line.includes(':')) {
-                  try {
-                    const colonIndex = line.indexOf(':')
-                    const jsonStr = line.substring(colonIndex + 1)
-                    
-                    if (jsonStr.trim()) {
-                      const data = JSON.parse(jsonStr)
-                      if (data.type === 'text-delta' && data.textDelta) {
-                        assistantContent += data.textDelta
-                      } else if (data.type === 'text' && data.text) {
-                        assistantContent += data.text
-                      } else if (data.textDelta) {
-                        // Fallback
-                        assistantContent += data.textDelta
-                      } else if (data.text) {
-                        assistantContent += data.text
-                      }
-                      
-                      // Update UI with accumulated content
-                      if (assistantContent) {
-                        setMessages((prev) => {
-                          const withoutAssistant = prev.filter((m) => m.id !== assistantId)
-                          return [
-                            ...withoutAssistant,
-                            {
-                              id: assistantId,
-                              role: "assistant",
-                              content: assistantContent,
-                            },
-                          ]
-                        })
-                      }
-                    }
-                  } catch (e) {
-                    // If parsing fails, skip this line
-                    console.debug("Failed to parse line:", line, e)
-                  }
-                }
-              }
-            }
+            // Update UI with accumulated content as it streams
+            setMessages((prev) => {
+              const withoutAssistant = prev.filter((m) => m.id !== assistantId)
+              return [
+                ...withoutAssistant,
+                {
+                  id: assistantId,
+                  role: "assistant",
+                  content: assistantContent,
+                },
+              ]
+            })
           }
         }
       }
@@ -134,8 +109,9 @@ export default function Home() {
             },
           ]
         })
-      } else {
-        // No content received - might be an error
+      } else if (!hasReceivedContent) {
+        // No content received - log for debugging
+        console.error("No content received from stream. Check server logs for errors.")
         setMessages((prev) => {
           const withoutAssistant = prev.filter((m) => m.id !== assistantId)
           return [
@@ -143,7 +119,7 @@ export default function Home() {
             {
               id: assistantId,
               role: "assistant",
-              content: "No response received. Please check your API configuration.",
+              content: "No response received. Please check:\n1. Your API key is set in .env.local\n2. The dev server was restarted after adding the API key\n3. Check browser console and server logs for errors",
             },
           ]
         })

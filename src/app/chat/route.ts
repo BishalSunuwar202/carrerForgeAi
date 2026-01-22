@@ -89,6 +89,21 @@ Provide a comprehensive skill gap analysis with actionable recommendations.`;
     ];
 
     console.log("Calling AI model with", messages.length, "messages")
+    console.log("API Key configured:", !!process.env.GOOGLE_GENERATIVE_AI_API_KEY)
+    
+    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      console.error("GOOGLE_GENERATIVE_AI_API_KEY is not set")
+      return new Response(
+        JSON.stringify({ 
+          error: "API key not configured", 
+          details: "Please set GOOGLE_GENERATIVE_AI_API_KEY in your .env.local file and restart the server" 
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    }
     
     const result = streamText({
       model: google("gemini-2.5-flash-lite"),
@@ -97,8 +112,9 @@ Provide a comprehensive skill gap analysis with actionable recommendations.`;
       temperature: 0.7,
     });
 
-    // Use toUIMessageStreamResponse for UI streaming format
-    return result.toUIMessageStreamResponse();
+    console.log("Stream created successfully, returning text stream response")
+    // Use toTextStreamResponse for simpler text streaming format
+    return result.toTextStreamResponse();
   } catch (error) {
     console.error("Chat route error:", error);
     const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";

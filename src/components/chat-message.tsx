@@ -49,7 +49,7 @@ export function ChatMessage({ role, content }: ChatMessageProps) {
           )}
         >
           {isUser ? (
-            <p className="whitespace-pre-wrap break-words">{content}</p>
+            <p className="whitespace-pre-wrap wrap-break-words">{content}</p>
           ) : (
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <ReactMarkdown
