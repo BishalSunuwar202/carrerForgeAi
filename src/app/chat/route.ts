@@ -65,7 +65,7 @@ Format your response using clear markdown with headers, bullet points, and struc
 
 ${userProfile}
 
----
+--- 
 
 ${jobRequirements}
 
