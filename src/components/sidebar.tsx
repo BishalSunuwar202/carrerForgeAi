@@ -3,16 +3,31 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { MessageSquarePlus, Menu, X, History } from "lucide-react"
+import { MessageSquarePlus, Menu, X, History, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AuthButton } from "@/components/auth-button"
+
+export interface ChatListItem {
+  id: string
+  title: string
+}
 
 interface SidebarProps {
   onNewChat: () => void
-  chatHistory?: string[]
+  chatHistory?: ChatListItem[]
+  activeChatId?: string | null
+  onSelectChat?: (id: string) => void
+  onDeleteChat?: (id: string) => void
 }
 
-export function Sidebar({ onNewChat, chatHistory = [] }: SidebarProps) {
-  const [isOpen, setIsOpen] = useState(false) // Start closed on mobile, will be open on desktop via CSS
+export function Sidebar({
+  onNewChat,
+  chatHistory = [],
+  activeChatId = null,
+  onSelectChat,
+  onDeleteChat,
+}: SidebarProps) {
+  const [isOpen, setIsOpen] = useState(false)
 
   return (
     <>
@@ -38,11 +53,12 @@ export function Sidebar({ onNewChat, chatHistory = [] }: SidebarProps) {
       >
         <div className="flex h-full flex-col">
           {/* Header */}
-          <div className="flex h-16 items-center gap-2 border-b border-border px-4">
+          <div className="flex h-16 items-center justify-between border-b border-border px-4">
             <div className="flex items-center gap-2">
               <MessageSquarePlus className="h-5 w-5" />
               <h1 className="text-lg font-semibold">CareerForgeAI</h1>
             </div>
+            <AuthButton />
           </div>
 
           {/* New Chat Button */}
@@ -74,18 +90,38 @@ export function Sidebar({ onNewChat, chatHistory = [] }: SidebarProps) {
                   No previous chats
                 </p>
               ) : (
-                chatHistory.map((chat, index) => (
-                  <Button
-                    key={index}
-                    variant="ghost"
-                    className="w-full justify-start font-normal"
-                    onClick={() => {
-                      // Handle chat selection
-                      console.log("Selected chat:", chat)
-                    }}
+                chatHistory.map((chat) => (
+                  <div
+                    key={chat.id}
+                    className={cn(
+                      "group flex items-center gap-1 rounded-md",
+                      activeChatId === chat.id && "bg-accent"
+                    )}
                   >
-                    {chat}
-                  </Button>
+                    <Button
+                      variant="ghost"
+                      className="flex-1 justify-start font-normal truncate"
+                      onClick={() => {
+                        onSelectChat?.(chat.id)
+                        setIsOpen(false)
+                      }}
+                    >
+                      <span className="truncate">{chat.title}</span>
+                    </Button>
+                    {onDeleteChat && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 opacity-0 group-hover:opacity-100"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onDeleteChat(chat.id)
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
                 ))
               )}
             </div>

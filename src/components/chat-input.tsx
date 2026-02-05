@@ -5,21 +5,31 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Plus, Send, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { MAX_PDF_SIZE_BYTES, PDF_MIME_TYPE } from "@/lib/chat-validation"
+
+const MAX_PDF_SIZE_MB = MAX_PDF_SIZE_BYTES / 1024 / 1024
 
 interface ChatInputProps {
   onSendMessage: (message: string, pdfFile?: File) => void
   isLoading?: boolean
+  onValidationError?: (message: string) => void
 }
 
-export function ChatInput({ onSendMessage, isLoading = false }: ChatInputProps) {
+export function ChatInput({
+  onSendMessage,
+  isLoading = false,
+  onValidationError,
+}: ChatInputProps) {
   const [message, setMessage] = useState("")
   const [pdfFile, setPdfFile] = useState<File | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!message.trim() && !pdfFile) return
     if (isLoading) return
+    setFileError(null)
 
     onSendMessage(message.trim(), pdfFile || undefined)
     setMessage("")
@@ -31,14 +41,30 @@ export function ChatInput({ onSendMessage, isLoading = false }: ChatInputProps) 
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file && file.type === "application/pdf") {
-      setPdfFile(file)
-    } else {
-      alert("Please upload a PDF file")
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
+    setFileError(null)
+
+    if (!file) {
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      return
     }
+
+    if (file.type !== PDF_MIME_TYPE) {
+      const msg = "Please upload a PDF file (.pdf only)."
+      setFileError(msg)
+      onValidationError?.(msg)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      return
+    }
+
+    if (file.size > MAX_PDF_SIZE_BYTES) {
+      const msg = `File is too large. Maximum size is ${MAX_PDF_SIZE_MB}MB.`
+      setFileError(msg)
+      onValidationError?.(msg)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+      return
+    }
+
+    setPdfFile(file)
   }
 
   const handleFileRemove = () => {
@@ -50,8 +76,15 @@ export function ChatInput({ onSendMessage, isLoading = false }: ChatInputProps) 
 
   return (
     <div className="sticky bottom-0 w-full border-t border-border bg-background">
+      {/* File validation error */}
+      {fileError && (
+        <div className="px-4 py-2 border-b border-destructive/50 bg-destructive/10 text-sm text-destructive">
+          {fileError}
+        </div>
+      )}
+
       {/* PDF Preview */}
-      {pdfFile && (
+      {pdfFile && !fileError && (
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-muted/50">
           <div className="flex-1 flex items-center gap-2">
             <span className="text-sm text-muted-foreground">📄</span>

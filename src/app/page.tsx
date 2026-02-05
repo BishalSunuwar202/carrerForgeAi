@@ -1,9 +1,27 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useCallback } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { ChatMessage } from "@/components/chat-message"
 import { ChatInput } from "@/components/chat-input"
+import { ErrorBoundary } from "@/components/error-boundary"
+import { JobSelector } from "@/components/job-selector"
+import type { JobPosting } from "@/data/mock-jobs"
+import {
+  getChatListForSidebar,
+  getChatById,
+  saveChat,
+  deleteChat,
+  getActiveChatId,
+  setActiveChatId,
+  type StoredMessage,
+} from "@/lib/storage"
+import type { ChatListItem } from "@/components/sidebar"
+import { Button } from "@/components/ui/button"
+import { Download } from "lucide-react"
+
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 1500
 
 interface Message {
   id: string
@@ -11,19 +29,132 @@ interface Message {
   content: string
 }
 
+function parseApiError(body: string): { error?: string; details?: string } {
+  try {
+    return JSON.parse(body) as { error?: string; details?: string }
+  } catch {
+    return {}
+  }
+}
+
+function chatTitleFromMessages(messages: Message[]): string {
+  const first = messages.find((m) => m.role === "user")
+  if (!first) return "New Chat"
+  const text = first.content.replace(/\s+/g, " ").trim()
+  return text.slice(0, 50) + (text.length > 50 ? "…" : "")
+}
+
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [selectedJob, setSelectedJob] = useState<JobPosting | null>(null)
+  const [currentChatId, setCurrentChatId] = useState<string | null>(null)
+  const [chatList, setChatList] = useState<ChatListItem[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Restore active chat from localStorage on mount
+  useEffect(() => {
+    const activeId = getActiveChatId()
+    if (activeId) {
+      const chat = getChatById(activeId)
+      if (chat?.messages?.length) {
+        setCurrentChatId(chat.id)
+        setMessages(
+          chat.messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+          }))
+        )
+      }
+    }
+    setChatList(getChatListForSidebar())
+  }, [])
+
+  // Persist current chat when messages change
+  useEffect(() => {
+    if (messages.length === 0) return
+    const id = currentChatId ?? `chat-${Date.now()}`
+    if (!currentChatId) setCurrentChatId(id)
+    const title = chatTitleFromMessages(messages)
+    const stored: StoredMessage[] = messages.map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+    }))
+    const existing = getChatById(id)
+    saveChat({
+      id,
+      title,
+      messages: stored,
+      createdAt: existing?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+    })
+    setActiveChatId(id)
+    setChatList(getChatListForSidebar())
+  }, [messages, currentChatId])
 
   const handleNewChat = () => {
     setMessages([])
+    setCurrentChatId(null)
+    setActiveChatId(null)
+    setChatList(getChatListForSidebar())
   }
+
+  const handleSelectChat = useCallback((id: string) => {
+    const chat = getChatById(id)
+    if (chat) {
+      setCurrentChatId(chat.id)
+      setMessages(
+        chat.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+        }))
+      )
+      setActiveChatId(id)
+    }
+  }, [])
+
+  const handleDeleteChat = useCallback((id: string) => {
+    deleteChat(id)
+    setChatList(getChatListForSidebar())
+    if (currentChatId === id) {
+      setMessages([])
+      setCurrentChatId(null)
+      setActiveChatId(null)
+    }
+  }, [currentChatId])
+
+  const handleExportMarkdown = useCallback(() => {
+    const lines = messages.map((m) => {
+      const role = m.role === "user" ? "You" : "CareerForgeAI"
+      return `## ${role}\n\n${m.content}`
+    })
+    const md = lines.join("\n\n---\n\n")
+    const blob = new Blob([md], { type: "text/markdown" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `careerforge-chat-${currentChatId ?? Date.now()}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [messages, currentChatId])
+
+  const handleValidationError = useCallback((msg: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: `**Validation:** ${msg}`,
+      },
+    ])
+  }, [])
 
   const handleSendMessage = async (message: string, pdfFile?: File) => {
     if (!message.trim() && !pdfFile) return
 
-    // Add user message to UI immediately
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
@@ -33,24 +164,27 @@ export default function Home() {
     setMessages(updatedMessages)
     setIsLoading(true)
 
-    try {
-      // Create FormData for file upload
-      const formData = new FormData()
-      if (message) formData.append("message", message)
-      if (pdfFile) formData.append("pdf", pdfFile)
-      formData.append("messages", JSON.stringify(updatedMessages))
+    let lastError: Error | null = null
 
-      // Send to chat API
-      const response = await fetch("/chat", {
-        method: "POST",
-        body: formData,
-      })
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const formData = new FormData()
+        if (message) formData.append("message", message)
+        if (pdfFile) formData.append("pdf", pdfFile)
+        if (selectedJob?.id) formData.append("jobId", selectedJob.id)
+        formData.append("messages", JSON.stringify(updatedMessages))
 
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error("API Error:", errorText)
-        throw new Error(`Failed to process request: ${response.status} ${errorText}`)
-      }
+        const response = await fetch("/chat", {
+          method: "POST",
+          body: formData,
+        })
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          const { error, details } = parseApiError(errorText)
+          const msg = [error, details].filter(Boolean).join(" — ") || errorText
+          throw new Error(msg)
+        }
 
       // Handle streaming response (text stream format - simpler than UI message stream)
       const reader = response.body?.getReader()
@@ -110,8 +244,7 @@ export default function Home() {
           ]
         })
       } else if (!hasReceivedContent) {
-        // No content received - log for debugging
-        console.error("No content received from stream. Check server logs for errors.")
+        console.error("No content received from stream.")
         setMessages((prev) => {
           const withoutAssistant = prev.filter((m) => m.id !== assistantId)
           return [
@@ -119,22 +252,31 @@ export default function Home() {
             {
               id: assistantId,
               role: "assistant",
-              content: "No response received. Please check:\n1. Your API key is set in .env.local\n2. The dev server was restarted after adding the API key\n3. Check browser console and server logs for errors",
+              content: "No response received. Please check:\n1. Your API key is set in .env.local\n2. Restart the dev server after adding the API key\n3. Check browser console and server logs for errors",
             },
           ]
         })
       }
-    } catch (error) {
-      console.error("Error sending message:", error)
+
+        break
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err))
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS))
+        }
+      }
+    }
+
+    if (lastError) {
       const errorMessage: Message = {
         id: (Date.now() + 2).toString(),
         role: "assistant",
-        content: `Sorry, I encountered an error: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`,
+        content: `**Something went wrong**\n\n${lastError.message}\n\nYou can try again or start a new chat.`,
       }
       setMessages((prev) => [...prev, errorMessage])
-    } finally {
-      setIsLoading(false)
     }
+
+    setIsLoading(false)
   }
 
   useEffect(() => {
@@ -143,11 +285,16 @@ export default function Home() {
 
   return (
     <div className="flex h-screen w-full bg-background">
-      {/* Sidebar */}
-      <Sidebar onNewChat={handleNewChat} chatHistory={[]} />
+      <Sidebar
+        onNewChat={handleNewChat}
+        chatHistory={chatList}
+        activeChatId={currentChatId}
+        onSelectChat={handleSelectChat}
+        onDeleteChat={handleDeleteChat}
+      />
 
-      {/* Main Chat Area */}
-      <main className="flex flex-1 flex-col lg:pl-64">
+      <ErrorBoundary>
+        <main className="flex flex-1 flex-col lg:pl-64">
         {/* Chat Messages */}
         <div className="flex-1 overflow-y-auto">
           {messages.length === 0 ? (
@@ -170,6 +317,17 @@ export default function Home() {
             </div>
           ) : (
             <div className="flex flex-col">
+              <div className="flex justify-end px-4 pt-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="gap-2 text-muted-foreground"
+                  onClick={handleExportMarkdown}
+                >
+                  <Download className="h-4 w-4" />
+                  Export as Markdown
+                </Button>
+              </div>
               {messages.map((message) => (
                 <ChatMessage
                   key={message.id}
@@ -193,7 +351,11 @@ export default function Home() {
                       style={{ animationDelay: "300ms" }}
                     />
                   </div>
-                  <span className="text-sm">Analyzing skills...</span>
+                  <span className="text-sm">
+                    {messages[messages.length - 1]?.content?.startsWith("Uploaded PDF")
+                      ? "Reading PDF & analyzing skills…"
+                      : "Analyzing skills…"}
+                  </span>
                 </div>
               )}
               <div ref={messagesEndRef} />
@@ -201,9 +363,19 @@ export default function Home() {
           )}
         </div>
 
-        {/* Chat Input */}
-        <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
+        <div className="space-y-2 px-4 pb-2">
+          <JobSelector
+            selectedJobId={selectedJob?.id ?? null}
+            onSelectJob={setSelectedJob}
+          />
+        </div>
+        <ChatInput
+          onSendMessage={handleSendMessage}
+          isLoading={isLoading}
+          onValidationError={handleValidationError}
+        />
       </main>
+      </ErrorBoundary>
     </div>
   )
 }
