@@ -186,7 +186,7 @@ export async function POST(req: Request) {
 
     // Trigger async evaluation after response (fire-and-forget)
     // We'll collect the full AI response for evaluation
-    result.text.then((fullText) => {
+    Promise.resolve(result.text).then((fullText) => {
       if (isOpikEnabled() && opikTraceId) {
         // Log interaction metadata
         console.log("AI Response complete:", {
@@ -203,7 +203,7 @@ export async function POST(req: Request) {
           aiAnalysis: fullText,
         });
       }
-    }).catch((err: Error) => {
+    }).catch((err: unknown) => {
       console.error("Failed to process AI response for evaluation:", err);
     });
 
