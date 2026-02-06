@@ -7,8 +7,8 @@ import { Opik } from "opik";
 
 // Initialize Opik client with configuration from environment variables
 export const opikClient = new Opik({
-  apiKey: process.env.OPIK_API_KEY,
-  workspace: process.env.OPIK_WORKSPACE || "careerforgeai",
+  apiKey: process.env.OPIK_API_KEY!,
+  workspaceName: process.env.OPIK_WORKSPACE || "careerforgeai",
   projectName: process.env.OPIK_PROJECT || "skill-gap-hackathon",
 });
 
