@@ -1,20 +1,20 @@
 // Server-side PDF text extraction utility
-
-const MAX_PAGES_DEFAULT = 50
+import { PDFParse } from "pdf-parse";
 
 /**
  * Extract text from a PDF buffer.
- * Handles empty/corrupt files and limits pages for large PDFs.
+ * Handles empty/corrupt files.
  */
 export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
   if (!buffer?.length) {
     throw new Error("PDF file is empty")
   }
 
+  let parser: PDFParse | null = null;
   try {
-    const pdf = require("pdf-parse") as (buf: Buffer, opts?: { max?: number }) => Promise<{ text: string; numpages: number }>
-    const data = await pdf(buffer, { max: MAX_PAGES_DEFAULT })
-    const text = (data.text ?? "").trim()
+    parser = new PDFParse({ data: new Uint8Array(buffer) });
+    const result = await parser.getText();
+    const text = (result.text ?? "").trim();
 
     if (!text) {
       throw new Error(
@@ -22,7 +22,7 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
       )
     }
 
-    return text
+    return text;
   } catch (error) {
     if (error instanceof Error) {
       if (error.message.includes("empty") || error.message.includes("No text")) {
@@ -34,5 +34,7 @@ export async function extractTextFromPDF(buffer: Buffer): Promise<string> {
       )
     }
     throw new Error("Failed to extract text from PDF")
+  } finally {
+    await parser?.destroy().catch(() => {});
   }
 }
