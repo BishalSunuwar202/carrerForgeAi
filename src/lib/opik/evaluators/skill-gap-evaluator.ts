@@ -50,11 +50,11 @@ export async function evaluateSkillGapAnalysis(
         const trace = opikClient.trace({
           name: "skill-gap-evaluation",
           input: {
-            userProfile: input.userProfile.substring(0, 500), // Truncate for logging
+            userProfile: input.userProfile.substring(0, 500),
             jobRequirements: input.jobRequirements.substring(0, 500),
             aiAnalysis: input.aiAnalysis.substring(0, 1000),
           },
-          output: scores,
+          output: { ...scores } as Record<string, unknown>,
           metadata: {
             evaluationType: "llm-as-judge",
             judgeModel: "gemini-2.0-flash-lite",
@@ -62,27 +62,17 @@ export async function evaluateSkillGapAnalysis(
           },
         });
 
-        opikTraceId = trace.id;
+        opikTraceId = trace.data.id;
 
-        // Log individual scores as metrics
-        opikClient.log({
-          traceId: trace.id,
-          name: "evaluation-scores",
-          type: "llm",
-          input: judgePrompt,
-          output: judgeResponse.text,
-          metadata: {
-            scores: {
-              accuracy: scores.accuracy,
-              completeness: scores.completeness,
-              relevance: scores.relevance,
-              falsePositives: scores.falsePositives,
-              actionability: scores.actionability,
-              overall: scores.overall,
-            },
-            reasoning: scores.reasoning,
-          },
-        });
+        // Log individual scores as feedback
+        trace.score({ name: "accuracy", value: scores.accuracy / 100 });
+        trace.score({ name: "completeness", value: scores.completeness / 100 });
+        trace.score({ name: "relevance", value: scores.relevance / 100 });
+        trace.score({ name: "false-positives", value: scores.falsePositives / 100 });
+        trace.score({ name: "actionability", value: scores.actionability / 100 });
+        trace.score({ name: "overall", value: scores.overall / 100 });
+
+        trace.end();
       } catch (opikError) {
         console.error("Failed to log to Opik:", opikError);
         // Continue even if Opik logging fails
