@@ -24,6 +24,15 @@
 prisma/dev.db
 prisma/dev.db-journal
 
+# PostgreSQL local dumps
+*.sql
+*.dump
+postgres-data/
+
+# Opik local cache
+.opik/
+opik-cache/
+
 # misc
 .DS_Store
 *.pem

@@ -3,34 +3,121 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String?  @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  chats     Chat[]
+  id                String              @id @default(cuid())
+  email             String?             @unique
+  name              String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  chats             Chat[]
+  feedbacks         Feedback[]
+  skillAssessments  SkillAssessment[]
+  learningProgress  LearningProgress[]
 }
 
 model Chat {
-  id        String    @id @default(cuid())
-  userId    String?
-  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  title     String
-  messages  Message[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  userId            String?
+  user              User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  title             String
+  messages          Message[]
+
+  // Opik integration fields
+  opikTraceId       String?
+  experimentVariant String?
+  evaluationScores  Json?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
 
 model Message {
-  id        String   @id @default(cuid())
-  chatId    String
-  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  role      String
-  content   String
-  createdAt DateTime @default(now())
+  id                String   @id @default(cuid())
+  chatId            String
+  chat              Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role              String
+  content           String   @db.Text
+
+  // Opik integration fields
+  opikSpanId        String?
+  qualityScore      Float?
+  tokensUsed        Int?
+  latencyMs         Int?
+
+  createdAt         DateTime @default(now())
+}
+
+model Feedback {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageId         String
+  rating            Int
+  feedbackType      String
+  helpfulnessScore  Int?
+  accuracyScore     Int?
+  comment           String?  @db.Text
+  opikFeedbackId    String?
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+  @@index([messageId])
+}
+
+model SkillAssessment {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId             String
+  identifiedSkills  Json
+  skillGaps         Json
+  recommendedPath   Json
+  opikTraceId       String?  @unique
+  accuracyScore     Float?
+  completenessScore Float?
+  relevanceScore    Float?
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+  @@index([jobId])
+  @@index([createdAt])
+}
+
+model LearningProgress {
+  id                     String    @id @default(cuid())
+  userId                 String
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetSkill            String
+  startDate              DateTime
+  targetCompletionDate   DateTime?
+  actualCompletionDate   DateTime?
+  recommendedResources   Json
+  completedResources     Json
+  selfAssessedLevel      Int?
+  finalAssessedLevel     Int?
+  opikExperimentId       String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([targetSkill])
+  @@index([startDate])
+}
+
+model OpikExperiment {
+  id                String   @id @default(cuid())
+  name              String
+  description       String?
+  experimentType    String
+  status            String
+  variants          Json
+  totalRuns         Int      @default(0)
+  winningVariant    String?
+  opikExperimentId  String   @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }

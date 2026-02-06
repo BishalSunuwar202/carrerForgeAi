@@ -14,6 +14,8 @@ import {
   buildJobRequirementsText,
 } from "@/lib/prompts";
 import { rateLimit, getRateLimitIdentifier } from "@/lib/rate-limit";
+import { opikClient, isOpikEnabled } from "@/lib/opik/client";
+import { evaluateSkillGapAsync } from "@/lib/opik/evaluators/skill-gap-evaluator";
 
 interface Message {
   id: string;
@@ -35,7 +37,16 @@ function errorResponse(message: string, status: number = 400, details?: string) 
 }
 
 export async function POST(req: Request) {
+  const startTime = Date.now();
+  let opikTraceId: string | undefined;
+
   try {
+    // Generate trace ID for Opik integration
+    if (isOpikEnabled()) {
+      opikTraceId = `trace-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      console.log("Opik trace ID:", opikTraceId);
+    }
+
     const id = getRateLimitIdentifier(req);
     const { success: allowed, remaining } = rateLimit(id);
     if (!allowed) {
@@ -166,7 +177,36 @@ export async function POST(req: Request) {
 
     console.log("Stream created successfully, returning text stream response")
     const response = result.toTextStreamResponse();
-    response.headers.set("X-RateLimit-Remaining", String(remaining))
+    response.headers.set("X-RateLimit-Remaining", String(remaining));
+
+    // Add Opik trace ID to response headers if available
+    if (opikTraceId) {
+      response.headers.set("X-Opik-Trace-ID", opikTraceId);
+    }
+
+    // Trigger async evaluation after response (fire-and-forget)
+    // We'll collect the full AI response for evaluation
+    result.text.then((fullText) => {
+      if (isOpikEnabled() && opikTraceId) {
+        // Log interaction metadata
+        console.log("AI Response complete:", {
+          traceId: opikTraceId,
+          latencyMs: Date.now() - startTime,
+          jobId: jobPosting.id,
+          hasPDF: !!pdfText,
+        });
+
+        // Trigger async LLM-as-judge evaluation
+        evaluateSkillGapAsync({
+          userProfile,
+          jobRequirements,
+          aiAnalysis: fullText,
+        });
+      }
+    }).catch((err: Error) => {
+      console.error("Failed to process AI response for evaluation:", err);
+    });
+
     return response;
   } catch (error) {
     console.error("Chat route error:", error);
